@@ -34,6 +34,8 @@ import {
 } from 'lucide-react';
 import { DEFAULT_LOCAL_MODELS, discoverLocalModels, chatWithLocalModel, LocalModelError, type LocalModel } from '@/lib/ai/localModels';
 import { LOCAL_HTML_SYSTEM_PROMPT, sanitizeHtmlDocument, type PreviewStatus } from '@/lib/builder/localHtmlPreview';
+import { generateApp } from '@/lib/ai/universalAI';
+import { detectAppType } from '@/lib/ai/appTypeDetection';
 import type { AppSchema } from '@/lib/builder/appSchema';
 import { createEmptySchema } from '@/lib/builder/appSchema';
 import { starterTemplates } from '@/lib/templates/templates';
@@ -730,77 +732,63 @@ function App() {
     setIsLoading(true);
     setLastPrompt(content);
     setPreviewStatus('generating');
-    setGenerationStatusText('Builder is shaping a live preview now.');
-    setActiveScreen('preview');
-    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', content };
+    setGenerationStatusText("Planning...");
+    setActiveScreen("preview");
+    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: "user", content };
     const assistantId = crypto.randomUUID();
     setMessages((current) => [
       ...current,
       userMessage,
-      { id: assistantId, role: 'assistant', content: 'Builder is mapping the screen and streaming the preview live.', isLoading: true },
+      { id: assistantId, role: "assistant", content: "I am building your application now...", isLoading: true },
     ]);
 
     try {
-      if (requiresLocalRuntimeBridge()) {
-        throw new LocalModelError(
-          'This deployed builder can open the shell, but browser security blocks direct access to your local Ollama runtime from a public HTTPS site.',
-          'Run LOTUS locally at http://127.0.0.1:4173/builder for local generation, or add a local proxy/desktop bridge before using the deployed builder for prompts.',
-        );
-      }
-      const liveModels = await refreshAvailableModels().catch(() => availableModels);
-      const model = liveModels.find((entry) => entry.id === chatModelId) ?? liveModels[0] ?? availableModels[0];
-      if (!model) {
-        throw new LocalModelError(
-          'No local models found.',
-          'Start Ollama or LM Studio. Recommended: ollama pull qwen2.5-coder:1.5b',
-        );
-      }
-      const raw = await chatWithLocalModel(model, [
-        { role: 'system', content: LOCAL_HTML_SYSTEM_PROMPT },
-        { role: 'user', content },
-      ], {
-        signal: controller.signal,
-        maxTokens: Math.min(maxTokens, 1200),
-        temperature,
-        onChunk: (_chunk, fullText) => {
-          const liveHtml = sanitizeHtmlDocument(fullText);
-          if (liveHtml) {
-            setPreviewHtml(liveHtml);
-            setPreviewStatus('generating');
-          }
-          const draftSteps = Math.max(1, Math.min(6, Math.round(fullText.length / 420)));
-          setGenerationStatusText(`Streaming live from ${model.label}. Draft ${draftSteps} is in motion.`);
-          setMessages((current) =>
-            current.map((message) =>
-              message.id === assistantId
-                ? {
-                    ...message,
-                    content: `Build update: ${model.label} is streaming the preview live. ${draftSteps} pass${draftSteps === 1 ? '' : 'es'} drafted so far.`,
-                    isLoading: true,
-                  }
-                : message,
-            ),
-          );
+      const appType = detectAppType(content);
+
+      setGenerationStatusText("Generating...");
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === assistantId
+            ? { ...message, content: "I am generating the core screens and layout..." }
+            : message,
+        ),
+      );
+
+      const result = await generateApp({
+        prompt: content,
+        projectContext: {
+          name: currentProject?.name || "Untitled",
+          appType,
         },
       });
-      const html = sanitizeHtmlDocument(raw);
-      if (!html) throw new Error('The model returned no usable HTML.');
-      const nextSuggestions = [
-        'Create the next screen in this flow.',
-        'Add a pricing or onboarding step.',
-        'Refine the visuals and spacing for production.',
-      ];
+
+      const html = sanitizeHtmlDocument(result.content);
+      if (!html) throw new Error("Failed to generate app.");
+
+      setGenerationStatusText("Building...");
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === assistantId
+            ? { ...message, content: "I created the core screens and layout. Opening the live preview now..." }
+            : message,
+        ),
+      );
+
       setPreviewHtml(html);
-      setPreviewStatus('success');
-      setGenerationStatusText(`Live preview refreshed from ${model.label}. Ask for another screen, a redesign, or richer visuals next.`);
+      setPreviewStatus("success");
+
+      const displayAppType = appType === "custom" ? "custom app" : appType;
+      const responseText = "I built the first version of your " + displayAppType + ". The core screens and layout are ready. Here is what I can add next:";
+
+      setGenerationStatusText("Ready.");
       setMessages((current) =>
         current.map((message) =>
           message.id === assistantId
             ? {
                 ...message,
-                content: `Build update: I refreshed the live preview with ${model.label}. Next move: ask for another screen, a brand pass, or an image-rich hero and I’ll rebuild it live.`,
+                content: responseText,
                 isLoading: false,
-                suggestions: nextSuggestions,
+                suggestions: result.suggestedNextSteps,
               }
             : message,
         ),
