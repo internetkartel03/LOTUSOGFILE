@@ -53,6 +53,18 @@
     border: none;
     border-radius: 24px;
   }
+  /* Dailymotion SDK rewrites the container's inline style, so enforce sizing here. */
+  #dm-player-container {
+    width: 100% !important;
+    height: 100% !important;
+    padding-bottom: 0 !important;
+    border-radius: 24px;
+    overflow: hidden;
+  }
+  #dm-player-container iframe {
+    position: absolute;
+    inset: 0;
+  }
   .btn-primary {
     width: 100%;
     padding: 14px;
@@ -175,10 +187,14 @@
     <a href="index.html" class="back-link no-print">&larr; Back to Lessons</a>
 
     <div id="videoSection" class="video-section">
-      <iframe id="lessonVideo" src="https://www.dailymotion.com/embed/video/xakcva2" allow="autoplay" allowfullscreen=""></iframe>
+      <video id="lessonVideo" controls playsinline preload="metadata" style="width:100%;height:100%;border-radius:24px;background:#000;"></video>
+      <div id="videoPlaceholder" style="display:none;flex-direction:column;align-items:center;gap:10px;color:#aaa;font-size:15px;">
+        <span style="font-size:36px;">&#127909;</span>
+        <span id="videoPlaceholderText">Video coming soon</span>
+      </div>
     </div>
 
-    <button id="startQuizBtn" class="btn-primary no-print">&#9654; Start Quiz After Video</button>
+    <button id="startQuizBtn" class="btn-primary no-print" disabled>&#9654; Start Quiz After Video</button>
 
     <h2 id="lessonTitle">Lesson 1 Assessment</h2>
 
@@ -365,6 +381,122 @@
     resultBox.classList.add("hidden");
     certificate.style.display = "none";
     renderQuestion();
+  }
+
+  // Lesson video: streamed URL resolution + quiz gating.
+  // Priority: ?videoUrl= query param -> per-lesson map in localStorage -> bundled default.
+  const lessonVideo = document.getElementById("lessonVideo");
+  const videoPlaceholder = document.getElementById("videoPlaceholder");
+  const videoPlaceholderText = document.getElementById("videoPlaceholderText");
+
+  function showVideoPlaceholder(text) {
+    lessonVideo.style.display = "none";
+    videoPlaceholder.style.display = "flex";
+    videoPlaceholderText.textContent = text;
+    // No video available: don't lock the learner out of the quiz.
+    startQuizBtn.disabled = false;
+  }
+
+  function resolveLessonVideoUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const fromQuery = params.get("videoUrl") || params.get("video_url") || params.get("videoSrc");
+    if (fromQuery) return fromQuery;
+    try {
+      const map = JSON.parse(localStorage.getItem("lotusLessonVideos") || "{}");
+      const lesson = params.get("lesson") || "1";
+      if (typeof map[lesson] === "string" && map[lesson]) return map[lesson];
+    } catch (_) { /* corrupted map — fall through to default */ }
+    return "https://dai.ly/xakcva2";
+  }
+
+  // Dailymotion page/short links can't play in a <video> tag — swap to the embed player.
+  function dailymotionVideoId(url) {
+    const match = url.match(/(?:dai\.ly\/|dailymotion\.com\/(?:video|embed\/video)\/)([a-zA-Z0-9]+)/);
+    return match ? match[1] : null;
+  }
+
+  function youtubeVideoId(url) {
+    const match = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/))([a-zA-Z0-9_-]{6,})/);
+    return match ? match[1] : null;
+  }
+
+  function mountEmbedPlayer(src, endedMatcher) {
+    lessonVideo.style.display = "none";
+    const iframe = document.createElement("iframe");
+    iframe.src = src;
+    iframe.allow = "autoplay; fullscreen";
+    iframe.allowFullscreen = true;
+    iframe.style.cssText = "width:100%;height:100%;border:none;border-radius:24px;background:#000;";
+    videoSection.appendChild(iframe);
+    window.addEventListener("message", (event) => {
+      if (endedMatcher(event)) startQuizBtn.disabled = false;
+    });
+  }
+
+  // Official Dailymotion Player SDK: guaranteed VIDEO_END event for quiz gating.
+  // Falls back to a plain embed iframe if the SDK fails to load.
+  function mountDailymotionPlayer(videoId) {
+    lessonVideo.style.display = "none";
+    const container = document.createElement("div");
+    container.id = "dm-player-container";
+    container.style.cssText = "width:100%;height:100%;border-radius:24px;overflow:hidden;background:#000;";
+    videoSection.appendChild(container);
+
+    const fallbackToIframe = () => {
+      container.remove();
+      mountEmbedPlayer(
+        "https://geo.dailymotion.com/player.html?video=" + videoId,
+        (event) => {
+          if (typeof event.origin !== "string" || !event.origin.includes("dailymotion.com")) return false;
+          const data = typeof event.data === "string" ? event.data : JSON.stringify(event.data ?? "");
+          return data.includes("video_end") || data.includes('"ended":true') || data.includes("event=end") || data.includes('"event":"end"');
+        }
+      );
+    };
+
+    const script = document.createElement("script");
+    script.src = "https://geo.dailymotion.com/player.js";
+    script.onload = () => {
+      if (!window.dailymotion || typeof window.dailymotion.createPlayer !== "function") {
+        fallbackToIframe();
+        return;
+      }
+      window.dailymotion
+        .createPlayer("dm-player-container", { video: videoId })
+        .then((player) => {
+          player.on(window.dailymotion.events.VIDEO_END, () => {
+            startQuizBtn.disabled = false;
+          });
+        })
+        .catch(fallbackToIframe);
+    };
+    script.onerror = fallbackToIframe;
+    document.head.appendChild(script);
+  }
+
+  const videoUrl = resolveLessonVideoUrl();
+  const dmId = videoUrl ? dailymotionVideoId(videoUrl) : null;
+  const ytId = videoUrl ? youtubeVideoId(videoUrl) : null;
+  if (!videoUrl) {
+    showVideoPlaceholder("Video coming soon");
+  } else if (dmId) {
+    mountDailymotionPlayer(dmId);
+  } else if (ytId) {
+    mountEmbedPlayer(
+      "https://www.youtube.com/embed/" + ytId + "?enablejsapi=1",
+      (event) => {
+        if (typeof event.origin !== "string" || !event.origin.includes("youtube.com")) return false;
+        const data = typeof event.data === "string" ? event.data : "";
+        return data.includes('"playerState":0') || data.includes('"info":0');
+      }
+    );
+  } else if (window.location.protocol === "https:" && videoUrl.startsWith("http:")) {
+    // Mixed content would be blocked silently — surface it instead.
+    showVideoPlaceholder("Video unavailable (insecure video link)");
+  } else {
+    lessonVideo.src = videoUrl;
+    lessonVideo.addEventListener("error", () => showVideoPlaceholder("Video unavailable"));
+    lessonVideo.addEventListener("ended", () => { startQuizBtn.disabled = false; });
   }
 
   startQuizBtn.onclick = startQuiz;

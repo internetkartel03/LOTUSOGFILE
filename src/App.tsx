@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent, ReactElement, ReactNode } from 'react';
 import {
   Bot,
@@ -32,7 +32,7 @@ import {
   Wand2,
   Zap,
 } from 'lucide-react';
-import { discoverLocalModels, chatWithLocalModel, LocalModelError, type LocalModel } from '@/lib/ai/localModels';
+import { DEFAULT_LOCAL_MODELS, discoverLocalModels, chatWithLocalModel, LocalModelError, type LocalModel } from '@/lib/ai/localModels';
 import { LOCAL_HTML_SYSTEM_PROMPT, sanitizeHtmlDocument, type PreviewStatus } from '@/lib/builder/localHtmlPreview';
 import type { AppSchema } from '@/lib/builder/appSchema';
 import { createEmptySchema } from '@/lib/builder/appSchema';
@@ -41,7 +41,7 @@ import type { StarterTemplate } from '@/lib/templates/templates';
 import lotusFlower from '@/assets/lotus-flower.png';
 import lotusLogo from '@/assets/lotus-logo.png';
 import './App.css';
-import UniversityHub from './components/UniversityHub';
+const UniversityHub = lazy(() => import('./components/UniversityHub'));
 
 type ScreenName = 'home' | 'projects' | 'preview' | 'settings';
 type SheetName = 'connectors' | 'templates' | 'agents' | 'advanced' | 'github' | 'profile' | 'newProject';
@@ -186,6 +186,14 @@ const defaultFollowUpSuggestions = [
   'Add richer visuals with inline SVG artwork.',
 ];
 
+function requiresLocalRuntimeBridge(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    window.location.protocol === 'https:' &&
+    !['localhost', '127.0.0.1'].includes(window.location.hostname)
+  );
+}
+
 function getPublicPath(pathname = window.location.pathname): PublicPath {
   const path = pathname as PublicPath;
   return publicPaths.includes(path) ? path : '/';
@@ -232,7 +240,7 @@ function App() {
   const [githubToken, setGithubToken] = useState('');
   const [githubStatus, setGithubStatus] = useState('');
   const [chatModelId, setChatModelId] = useState<LocalModelId>(() => readStoredString('lotus_chat_model', 'qwen-coder'));
-  const [availableModels, setAvailableModels] = useState<LocalModel[]>([]);
+  const [availableModels, setAvailableModels] = useState<LocalModel[]>(DEFAULT_LOCAL_MODELS);
   const [previewHtml, setPreviewHtml] = useState('');
   const [previewStatus, setPreviewStatus] = useState<PreviewStatus>('empty');
   const [lastPrompt, setLastPrompt] = useState('');
@@ -300,20 +308,15 @@ function App() {
 
 
 
-  useEffect(() => {
-    let cancelled = false;
-    void discoverLocalModels().then((models) => {
-      if (cancelled) return;
-      setAvailableModels(models);
-      setChatModelId((current) => {
-        if (models.some((model) => model.id === current)) return current;
-        return models.find((model) => model.id === 'qwen-coder')?.id ?? models[0]?.id ?? 'qwen-coder';
-      });
+  const refreshAvailableModels = async () => {
+    const models = await discoverLocalModels();
+    setAvailableModels(models);
+    setChatModelId((current) => {
+      if (models.some((model) => model.id === current)) return current;
+      return models.find((model) => model.id === 'qwen-coder')?.id ?? models[0]?.id ?? 'qwen-coder';
     });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    return models;
+  };
 
   useEffect(() => {
     const updatePath = () => setRoute(getAppRoute());
@@ -738,7 +741,14 @@ function App() {
     ]);
 
     try {
-      const model = availableModels.find((entry) => entry.id === chatModelId) ?? availableModels[0];
+      if (requiresLocalRuntimeBridge()) {
+        throw new LocalModelError(
+          'This deployed builder can open the shell, but browser security blocks direct access to your local Ollama runtime from a public HTTPS site.',
+          'Run LOTUS locally at http://127.0.0.1:4173/builder for local generation, or add a local proxy/desktop bridge before using the deployed builder for prompts.',
+        );
+      }
+      const liveModels = await refreshAvailableModels().catch(() => availableModels);
+      const model = liveModels.find((entry) => entry.id === chatModelId) ?? liveModels[0] ?? availableModels[0];
       if (!model) {
         throw new LocalModelError(
           'No local models found.',
@@ -1063,7 +1073,7 @@ function App() {
               </button>
             ))}
           </div>
-          <PopoverButton icon={<Sparkles />} title="Builder Model" detail="Qwen local today, API models later" onClick={() => openBottomSheet('advanced')} />
+          <PopoverButton icon={<Sparkles />} title="Builder Model" detail="Qwen local today, API models later" onClick={() => { void refreshAvailableModels(); openBottomSheet('advanced'); }} />
           <PopoverButton icon={<LayoutTemplate />} title="Templates" detail="Start from a template" onClick={() => openTemplates(false)} />
           <PopoverButton icon={<Bot />} title="Agents" detail="AI agents & skills" onClick={() => openBottomSheet('agents')} />
         </div>
@@ -1103,6 +1113,11 @@ function App() {
           })}
         </BottomSheet>
         <BottomSheet name="advanced" openSheet={openSheet}>
+          {requiresLocalRuntimeBridge() && (
+            <div className="form-status">
+              This public builder deploy is great for navigation and review, but local generation needs the app running on localhost because browsers block direct HTTPS-to-localhost model calls.
+            </div>
+          )}
           {availableModels.every((model) => !model.installed) && (
             <div className="form-status">
               Recommended setup: ollama pull qwen2.5-coder:1.5b. This build is tuned around one dependable local model today. API-key model slots can come in a later pass.
@@ -1113,7 +1128,7 @@ function App() {
               key={model.id}
               icon={<Bot />}
               title={`${model.label} ${model.detail}`}
-              detail={model.installed ? `Ready via ${model.backend === 'lmstudio' ? 'LM Studio' : 'Ollama'}` : model.setup}
+              detail={model.installed ? 'Ready via Ollama' : model.setup}
               tag={chatModelId === model.id ? 'Active' : model.installed ? 'Ready' : 'Setup'}
               onClick={() => {
                 selectChatModel(model.id);
@@ -1315,7 +1330,11 @@ function PublicLandingPage({ path, onHome, onPayment }: { path: PublicPath; onHo
   }
 
   if (path === '/university') {
-    return <UniversityHub />;
+    return (
+      <Suspense fallback={<section className="public-route-page about-page legal-about-background"><button className="public-brand" type="button" onClick={onHome}>LOTUS</button><article className="about-document"><p className="public-kicker">Lotus University</p><h1>Loading the university experience...</h1><p className="public-lede">Bringing in the full training hub now.</p></article></section>}>
+        <UniversityHub />
+      </Suspense>
+    );
   }
 
   return (

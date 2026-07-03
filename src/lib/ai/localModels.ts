@@ -1,11 +1,9 @@
-// Real downloadable local models — auto-discovered from the backends running
-// on this machine: Ollama (localhost:11434) and LM Studio (localhost:1234).
-// The browser talks straight to the local servers — no cloud APIs, no keys.
+// Real downloadable local models — auto-discovered from Ollama running on this
+// machine. The browser talks straight to the local server: no cloud APIs, no keys.
 
 const OLLAMA_URL = 'http://localhost:11434';
-const LMSTUDIO_URL = 'http://localhost:1234';
 
-export type LocalBackend = 'ollama' | 'lmstudio';
+export type LocalBackend = 'ollama';
 
 export interface LocalModel {
   id: string;
@@ -34,6 +32,8 @@ export const LOCAL_MODEL_REGISTRY: LocalModelRegistryEntry[] = [
     aliases: [/qwen.*coder/i, /qwen2\.5-coder/i, /qwen3-coder/i],
   },
 ];
+
+export const DEFAULT_LOCAL_MODELS: LocalModel[] = LOCAL_MODEL_REGISTRY.map(({ aliases, ...entry }) => ({ ...entry }));
 
 // Non-chat models that should never appear in the picker.
 const EXCLUDED_PATTERNS = [/embed/i, /whisper/i, /video/i, /audio/i, /vision-only/i, /^ltx-/i];
@@ -75,18 +75,9 @@ async function discoverOllamaModels(): Promise<LocalModel[]> {
     .map((name) => ({ id: `ollama:${name}`, model: name, backend: 'ollama' as const, installed: true, setup: '', ...prettyLabel(name) }));
 }
 
-async function discoverLmStudioModels(): Promise<LocalModel[]> {
-  const data = (await fetchJson(`${LMSTUDIO_URL}/v1/models`)) as { data?: Array<{ id: string }> } | null;
-  return (data?.data ?? [])
-    .map((entry) => entry.id)
-    .filter(isChatModel)
-    .map((name) => ({ id: `lmstudio:${name}`, model: name, backend: 'lmstudio' as const, installed: true, setup: '', ...prettyLabel(name) }));
-}
-
-/** Every chat-capable model installed locally, across all running backends. */
+/** Every chat-capable model installed locally through the active Ollama runtime. */
 export async function discoverLocalModels(): Promise<LocalModel[]> {
-  const [ollama, lmstudio] = await Promise.all([discoverOllamaModels(), discoverLmStudioModels()]);
-  const discovered = [...ollama, ...lmstudio];
+  const discovered = await discoverOllamaModels();
   const registryModels = LOCAL_MODEL_REGISTRY.map(({ aliases, ...entry }) => {
     const match = discovered.find((model) =>
       model.backend === entry.backend && aliases.some((pattern) => pattern.test(model.model)),
@@ -174,57 +165,9 @@ async function chatOllama(model: string, messages: Array<{ role: string; content
   return data.message?.content ?? '';
 }
 
-async function chatLmStudio(model: string, messages: Array<{ role: string; content: string }>, options?: ChatOptions): Promise<string> {
-  const response = await fetch(`${LMSTUDIO_URL}/v1/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    signal: options?.signal,
-    body: JSON.stringify({
-      model,
-      messages,
-      temperature: options?.temperature ?? 0.6,
-      max_tokens: options?.maxTokens ?? 1600,
-      stream: Boolean(options?.onChunk),
-    }),
-  });
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    throw new LocalModelError(`LM Studio request failed (${response.status}).`, body.slice(0, 200));
-  }
-  if (options?.onChunk && response.body) {
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let fullText = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const events = buffer.split('\n\n');
-      buffer = events.pop() ?? '';
-      for (const event of events) {
-        const line = event
-          .split('\n')
-          .map((entry) => entry.trim())
-          .find((entry) => entry.startsWith('data:'));
-        if (!line) continue;
-        const payload = line.slice(5).trim();
-        if (!payload || payload === '[DONE]') continue;
-        const parsed = JSON.parse(payload) as { choices?: Array<{ delta?: { content?: string } }> };
-        const chunk = parsed.choices?.[0]?.delta?.content ?? '';
-        fullText += chunk;
-        emitChunk(options, chunk, fullText);
-      }
-    }
-    return fullText;
-  }
-  const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-  return data.choices?.[0]?.message?.content ?? '';
-}
-
 export async function chatWithLocalModel(target: LocalModel, messages: Array<{ role: string; content: string }>, options?: ChatOptions): Promise<string> {
   if (!target.installed) {
     throw new LocalModelError(`${target.label} is not available in a running local runtime.`, target.setup);
   }
-  return target.backend === 'lmstudio' ? chatLmStudio(target.model, messages, options) : chatOllama(target.model, messages, options);
+  return chatOllama(target.model, messages, options);
 }

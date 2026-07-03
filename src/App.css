@@ -3,6 +3,12 @@
   min-height: 100dvh;
 }
 
+:root {
+  --landing-bg-image: url("/lotus-landing-mobile.png");
+  --landing-bg-position: 50% 46%;
+  --landing-bg-size: cover;
+}
+
 .landing-page {
   position: relative;
   width: 100%;
@@ -10,7 +16,7 @@
   overflow: hidden;
   background:
     linear-gradient(180deg, rgba(5, 4, 2, 0.04), rgba(5, 4, 2, 0.18)),
-    #050402 url("/lotus-landing-bg.jpg") center / cover no-repeat;
+    #050402 var(--landing-bg-image) var(--landing-bg-position) / var(--landing-bg-size) no-repeat;
   color: #fff8ed;
   isolation: isolate;
 }
@@ -28,7 +34,7 @@
   z-index: -3;
   width: 108vw;
   height: 108dvh;
-  background: #050402 url("/lotus-home-bg.jpg") center / cover no-repeat;
+  background: #050402 var(--landing-bg-image) var(--landing-bg-position) / var(--landing-bg-size) no-repeat;
   transform: scale(1.08);
   transform-origin: center center;
 }
@@ -320,7 +326,7 @@
   position: relative;
   background:
     linear-gradient(180deg, rgba(5, 4, 2, 0.18), rgba(5, 4, 2, 0.46)),
-    url("/lotus-landing-bg.jpg") center / cover fixed no-repeat;
+    var(--landing-bg-image) var(--landing-bg-position) / var(--landing-bg-size) fixed no-repeat;
 }
 
 .public-brand {
@@ -578,9 +584,20 @@
 }
 
 @media (min-width: 768px) {
+  :root {
+    --landing-bg-position: 50% 42%;
+  }
+
   .landing-header {
     top: 28px;
     left: 32px;
+  }
+
+  .landing-video {
+    inset: -2dvh -2vw;
+    width: 104vw;
+    height: 104dvh;
+    transform: scale(1.03);
   }
 
   .builder-modal {
@@ -627,6 +644,56 @@
 
   .about-section-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1180px) {
+  :root {
+    --landing-bg-position: 50% 40%;
+    --landing-bg-size: cover;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1180px) and (orientation: portrait) {
+  :root {
+    --landing-bg-position: 50% 48%;
+  }
+
+  .landing-video {
+    inset: 0;
+    width: 100vw;
+    height: 100dvh;
+    transform: none;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1366px) and (orientation: landscape) {
+  :root {
+    --landing-bg-image: url("/lotus-landing-desktop.png");
+    --landing-bg-position: 50% 50%;
+    --landing-bg-size: cover;
+  }
+
+  .landing-video {
+    inset: 0;
+    width: 100vw;
+    height: 100dvh;
+    transform: none;
+  }
+}
+
+@media (min-width: 1181px) {
+  :root {
+    --landing-bg-image: url("/lotus-landing-desktop.png");
+    --landing-bg-position: 50% 50%;
+    --landing-bg-size: cover;
+  }
+
+  .landing-video {
+    inset: 0;
+    width: 100vw;
+    height: 100dvh;
+    transform: none;
   }
 }
 

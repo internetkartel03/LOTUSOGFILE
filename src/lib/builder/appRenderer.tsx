@@ -837,12 +837,77 @@ function SummaryComponent({ items }: { items?: string[] }) {
   );
 }
 
+// Accept every field name the AI may use for a video link so URLs survive parsing.
+function resolveVideoSource(component: any): string | undefined {
+  const candidates = [
+    component.videoUrl,
+    component.video_url,
+    component.videoSrc,
+    component.lessonVideoUrl,
+    component.src,
+    component.url,
+    component.video,
+    getComponentValue(component, "videoUrl"),
+    getComponentValue(component, "src"),
+  ];
+  const found = candidates.find((value) => typeof value === "string" && /^(https?:\/\/|\/|data:)/.test(value.trim()));
+  return typeof found === "string" ? found.trim() : undefined;
+}
+
+function VideoBlock({
+  src,
+  title,
+  onEnded,
+}: {
+  src?: string;
+  title?: string;
+  onEnded?: () => void;
+}) {
+  const [failed, setFailed] = useState(false);
+
+  if (!src) {
+    return (
+      <div className="h-48 rounded-2xl bg-gray-100 border border-gray-200 flex flex-col items-center justify-center gap-2 text-gray-400">
+        <Video className="w-10 h-10" />
+        <span className="text-sm font-medium">Video coming soon</span>
+      </div>
+    );
+  }
+
+  if (failed) {
+    return (
+      <div className="h-48 rounded-2xl bg-gray-100 border border-gray-200 flex flex-col items-center justify-center gap-2 text-gray-400">
+        <Video className="w-10 h-10" />
+        <span className="text-sm font-medium">Video unavailable</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl overflow-hidden bg-black">
+      {title && (
+        <p className="px-4 pt-3 pb-1 text-sm font-medium text-white/80">{title}</p>
+      )}
+      <video
+        controls
+        playsInline
+        preload="metadata"
+        src={src}
+        className="w-full max-h-64 block"
+        onError={() => setFailed(true)}
+        onEnded={onEnded}
+      />
+    </div>
+  );
+}
+
 // Main renderer
 export function renderComponent(
   component: any,
   index: number,
   schema?: any,
-  onNavigate?: (screenId: string) => void
+  onNavigate?: (screenId: string) => void,
+  videoState?: { ended: boolean; onEnded: () => void }
 ): React.ReactNode {
   if (!component || !component.type) return null;
 
@@ -868,15 +933,23 @@ export function renderComponent(
         />
       );
 
-    case "button":
+    case "button": {
+      const isQuizButton = /quiz|assessment/i.test(component.text || "");
+      const gated = Boolean(videoState && isQuizButton && !videoState.ended);
       return (
-        <ButtonComponent
+        <div
           key={key}
-          text={component.text}
-          variant={component.variant}
-          icon={component.icon}
-        />
+          className={gated ? "opacity-50 pointer-events-none" : undefined}
+          title={gated ? "Finish the video to unlock" : undefined}
+        >
+          <ButtonComponent
+            text={component.text}
+            variant={component.variant}
+            icon={component.icon}
+          />
+        </div>
       );
+    }
 
     case "input":
       return (
@@ -1081,6 +1154,18 @@ export function renderComponent(
         </div>
       );
 
+    case "video":
+    case "videoPlayer":
+    case "lessonVideo":
+      return (
+        <VideoBlock
+          key={key}
+          src={resolveVideoSource(component)}
+          title={component.title}
+          onEnded={videoState?.onEnded}
+        />
+      );
+
     case "image":
       return (
         <ImageAssetFrame
@@ -1174,12 +1259,42 @@ export function renderAppSchema(schema: any, onNavigate?: (screenId: string) => 
   const navigationItems = bottomNavComponent?.items || schema.navigation?.items;
 
   return (
+    <ScreenBody
+      key={schema.activeScreenId || screen.id || screen.name}
+      screen={screen}
+      schema={schema}
+      onNavigate={onNavigate}
+      navigationItems={navigationItems}
+    />
+  );
+}
+
+function ScreenBody({
+  screen,
+  schema,
+  onNavigate,
+  navigationItems,
+}: {
+  screen: any;
+  schema: any;
+  onNavigate?: (screenId: string) => void;
+  navigationItems: any;
+}) {
+  const [videoEnded, setVideoEnded] = useState(false);
+  const hasVideo = Boolean(
+    screen.components?.some((c: any) => ["video", "videoPlayer", "lessonVideo"].includes(c.type))
+  );
+  const videoState = hasVideo
+    ? { ended: videoEnded, onEnded: () => setVideoEnded(true) }
+    : undefined;
+
+  return (
     <div className="h-full flex flex-col bg-gray-50">
       {/* Screen content */}
       <div className="flex-1 overflow-y-auto">
         <div className="p-4 space-y-4">
           {screen.components?.map((component: any, i: number) =>
-            renderComponent(component, i, schema, onNavigate)
+            renderComponent(component, i, schema, onNavigate, videoState)
           ) || <p className="text-center text-gray-400 py-8">Empty screen</p>}
         </div>
       </div>
