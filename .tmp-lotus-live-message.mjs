@@ -1,0 +1,11 @@
+import { chromium } from 'playwright';
+const browser = await chromium.launch({ headless: true, executablePath: 'C:/Users/user/AppData/Local/ms-playwright/chromium-1228/chrome-win64/chrome.exe' });
+const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+const page = await context.newPage();
+await page.goto('https://lotus-builder-studio.vercel.app', { waitUntil: 'networkidle' });
+await page.getByLabel('Build prompt').fill('Build a simple finance dashboard app with cards and a chart.');
+await page.locator('form.chatbar button[aria-label="Send"]').click();
+await page.getByText('Build Update', { exact: true }).waitFor({ timeout: 20000 });
+await page.waitForTimeout(1000);
+console.log(JSON.stringify({ message: await page.locator('.result-card p').textContent() }, null, 2));
+await browser.close();
