@@ -99,12 +99,29 @@ async function generateWithLocalAI(
 ): Promise<AIGenerationResponse> {
   try {
     // Attempt to use local model
-    const { chatWithLocalModel } = await import('./localModels');
+    const { chatWithLocalModel, DEFAULT_LOCAL_MODELS } = await import('./localModels');
 
     const context = buildAppTypeContext(appType, request.projectContext?.description);
     const fullPrompt = `${context}\n\n${request.prompt}`;
 
-    const content = await chatWithLocalModel(fullPrompt, {
+    // Use the first available local model
+    const model = DEFAULT_LOCAL_MODELS[0];
+    if (!model) {
+      throw new Error('No local models available');
+    }
+
+    const messages = [
+      {
+        role: 'system',
+        content: 'Return only valid HTML for app previews. No markdown, no explanation, no code fences unless required by the platform.'
+      },
+      {
+        role: 'user',
+        content: fullPrompt
+      }
+    ];
+
+    const content = await chatWithLocalModel(model, messages, {
       temperature: 0.45,
       maxTokens: 8000
     });
