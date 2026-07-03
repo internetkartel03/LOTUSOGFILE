@@ -33,6 +33,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { DEFAULT_LOCAL_MODELS, discoverLocalModels, chatWithLocalModel, LocalModelError, type LocalModel } from '@/lib/ai/localModels';
+import { detectAppType } from '@/lib/ai/appTypeDetection';
 import { LOCAL_HTML_SYSTEM_PROMPT, sanitizeHtmlDocument, type PreviewStatus } from '@/lib/builder/localHtmlPreview';
 import type { AppSchema } from '@/lib/builder/appSchema';
 import { createEmptySchema } from '@/lib/builder/appSchema';
@@ -724,90 +725,92 @@ function App() {
     generationAbortRef.current?.abort();
     const controller = new AbortController();
     generationAbortRef.current = controller;
-    setInput('');
+    setInput(‘’);
     setPopoverOpen(false);
     setOpenSheet(null);
     setIsLoading(true);
     setLastPrompt(content);
-    setPreviewStatus('generating');
-    setGenerationStatusText('Builder is shaping a live preview now.');
-    setActiveScreen('preview');
-    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', content };
+    setPreviewStatus(‘generating’);
+    setGenerationStatusText(‘Planning...’);
+    setActiveScreen(‘preview’);
+
+    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: ‘user’, content };
     const assistantId = crypto.randomUUID();
     setMessages((current) => [
       ...current,
       userMessage,
-      { id: assistantId, role: 'assistant', content: 'Builder is mapping the screen and streaming the preview live.', isLoading: true },
+      { id: assistantId, role: ‘assistant’, content: ‘I\’m building your application now...’, isLoading: true },
     ]);
 
     try {
-      if (requiresLocalRuntimeBridge()) {
-        throw new LocalModelError(
-          'This deployed builder can open the shell, but browser security blocks direct access to your local Ollama runtime from a public HTTPS site.',
-          'Run LOTUS locally at http://127.0.0.1:4173/builder for local generation, or add a local proxy/desktop bridge before using the deployed builder for prompts.',
-        );
-      }
-      const liveModels = await refreshAvailableModels().catch(() => availableModels);
-      const model = liveModels.find((entry) => entry.id === chatModelId) ?? liveModels[0] ?? availableModels[0];
-      if (!model) {
-        throw new LocalModelError(
-          'No local models found.',
-          'Start Ollama or LM Studio. Recommended: ollama pull qwen2.5-coder:1.5b',
-        );
-      }
-      const raw = await chatWithLocalModel(model, [
-        { role: 'system', content: LOCAL_HTML_SYSTEM_PROMPT },
-        { role: 'user', content },
-      ], {
-        signal: controller.signal,
-        maxTokens: Math.min(maxTokens, 1200),
-        temperature,
-        onChunk: (_chunk, fullText) => {
-          const liveHtml = sanitizeHtmlDocument(fullText);
-          if (liveHtml) {
-            setPreviewHtml(liveHtml);
-            setPreviewStatus('generating');
-          }
-          const draftSteps = Math.max(1, Math.min(6, Math.round(fullText.length / 420)));
-          setGenerationStatusText(`Streaming live from ${model.label}. Draft ${draftSteps} is in motion.`);
-          setMessages((current) =>
-            current.map((message) =>
-              message.id === assistantId
-                ? {
-                    ...message,
-                    content: `Build update: ${model.label} is streaming the preview live. ${draftSteps} pass${draftSteps === 1 ? '' : 'es'} drafted so far.`,
-                    isLoading: true,
-                  }
-                : message,
-            ),
-          );
-        },
-      });
-      const html = sanitizeHtmlDocument(raw);
-      if (!html) throw new Error('The model returned no usable HTML.');
-      const nextSuggestions = [
-        'Create the next screen in this flow.',
-        'Add a pricing or onboarding step.',
-        'Refine the visuals and spacing for production.',
-      ];
-      setPreviewHtml(html);
-      setPreviewStatus('success');
-      setGenerationStatusText(`Live preview refreshed from ${model.label}. Ask for another screen, a redesign, or richer visuals next.`);
+      // Import universal AI at runtime
+      const { generateApp, detectAppType } = await import(‘@/lib/ai/universalAI’);
+
+      const appType = detectAppType(content);
+
+      setGenerationStatusText(‘Generating...’);
       setMessages((current) =>
-        current.map((message) =>
-          message.id === assistantId
-            ? {
-                ...message,
-                content: `Build update: I refreshed the live preview with ${model.label}. Next move: ask for another screen, a brand pass, or an image-rich hero and I’ll rebuild it live.`,
-                isLoading: false,
-                suggestions: nextSuggestions,
-              }
-            : message,
+        current.map((msg) =>
+          msg.id === assistantId
+            ? { ...msg, content: ‘I\’m generating the core screens and layout...’, isLoading: true }
+            : msg,
         ),
       );
+
+      const result = await generateApp({
+        prompt: content,
+        projectContext: {
+          name: currentProject?.name || ‘Untitled’,
+          appType,
+          description: currentProject?.schema?.description,
+          previousMessages: messages.map((m) => `${m.role}: ${m.content}`),
+        },
+      });
+
+      const html = sanitizeHtmlDocument(result.content);
+      if (!html) throw new Error(‘Failed to generate app.’);
+
+      setGenerationStatusText(‘Building...’);
+      setMessages((current) =>
+        current.map((msg) =>
+          msg.id === assistantId
+            ? { ...msg, content: ‘I created the core screens and layout. Opening the live preview now...’, isLoading: true }
+            : msg,
+        ),
+      );
+
+      setPreviewHtml(html);
+      setPreviewStatus(‘success’);
+
+      const nextSuggestions = result.suggestedNextSteps || [
+        ‘Refine the design and layout.’,
+        ‘Add the next screen in the flow.’,
+        ‘Customize the colors and branding.’,
+      ];
+
+      setGenerationStatusText(‘Rendering Preview...’);
+
+      setTimeout(() => {
+        setGenerationStatusText(‘Ready.’);
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === assistantId
+              ? {
+                  ...message,
+                  content: `I built the first version of your ${appType} app with the core screens and layout. Here’s what I can add next:\n\n${nextSuggestions.map((s) => `• ${s}`).join(‘\n’)}`,
+                  isLoading: false,
+                  suggestions: nextSuggestions,
+                }
+              : message,
+          ),
+        );
+        setIsLoading(false);
+      }, 500);
+
+      return;
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') return;
-      const detail = error instanceof Error ? error.message : 'Unknown error';
+      if (error instanceof DOMException && error.name === ‘AbortError’) return;
+      const detail = error instanceof Error ? error.message : ‘Unknown error’;
       const hint = error instanceof LocalModelError ? ` ${error.hint}` : '';
       setPreviewStatus('error');
       setGenerationStatusText('The builder hit a real error before the preview could finish.');

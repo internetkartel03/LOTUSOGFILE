@@ -104,7 +104,7 @@ async function generateWithLocalAI(
     const context = buildAppTypeContext(appType, request.projectContext?.description);
     const fullPrompt = `${context}\n\n${request.prompt}`;
 
-    // Use first available local model
+    // Use the first available local model
     const model = DEFAULT_LOCAL_MODELS[0];
     if (!model) {
       throw new Error('No local models available');
@@ -113,7 +113,7 @@ async function generateWithLocalAI(
     const messages = [
       {
         role: 'system',
-        content: 'Return only valid HTML for app previews. No markdown, no explanation, no code fences.'
+        content: 'Return only valid HTML for app previews. No markdown, no explanation, no code fences unless required by the platform.',
       },
       {
         role: 'user',
