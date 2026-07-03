@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent, ReactElement, ReactNode } from 'react';
 import {
   Bot,
@@ -40,8 +40,8 @@ import { starterTemplates } from '@/lib/templates/templates';
 import type { StarterTemplate } from '@/lib/templates/templates';
 import lotusFlower from '@/assets/lotus-flower.png';
 import lotusLogo from '@/assets/lotus-logo.png';
+import UniversityHub from './components/UniversityHub';
 import './App.css';
-const UniversityHub = lazy(() => import('./components/UniversityHub'));
 
 type ScreenName = 'home' | 'projects' | 'preview' | 'settings';
 type SheetName = 'connectors' | 'templates' | 'agents' | 'advanced' | 'github' | 'profile' | 'newProject';
@@ -1330,11 +1330,7 @@ function PublicLandingPage({ path, onHome, onPayment }: { path: PublicPath; onHo
   }
 
   if (path === '/university') {
-    return (
-      <Suspense fallback={<section className="public-route-page about-page legal-about-background"><button className="public-brand" type="button" onClick={onHome}>LOTUS</button><article className="about-document"><p className="public-kicker">Lotus University</p><h1>Loading the university experience...</h1><p className="public-lede">Bringing in the full training hub now.</p></article></section>}>
-        <UniversityHub />
-      </Suspense>
-    );
+    return <UniversityHub />;
   }
 
   return (
