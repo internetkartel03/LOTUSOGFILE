@@ -1,5 +1,38 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useBuilderStore } from "../../../src/state/builderStore";
+
+vi.mock("../../../src/lib/ai/localModels", () => ({
+  discoverLocalModels: vi.fn(async () => [
+    {
+      id: "qwen-coder",
+      label: "Qwen Coder",
+      detail: "Default local builder · 1.5B",
+      model: "qwen2.5-coder:1.5b",
+      backend: "ollama",
+      installed: true,
+      setup: "ollama pull qwen2.5-coder:1.5b",
+    },
+  ]),
+  chatWithLocalModel: vi.fn(async () =>
+    JSON.stringify({
+      name: "Fitness Flow",
+      description: "A local-first fitness app",
+      screens: [
+        {
+          id: "home",
+          name: "Home",
+          title: "Fitness Home",
+          components: [{ type: "header", props: { title: "Fitness Home" } }],
+        },
+      ],
+      navigation: { type: "bottom", items: [] },
+      activeScreenId: "home",
+      theme: { mode: "dark" },
+      imageAssets: [],
+      features: ["tracking"],
+    }),
+  ),
+}));
 
 describe("Builder Store - Initial State", () => {
   beforeEach(() => {
@@ -135,13 +168,13 @@ describe("Builder Store - Messages", () => {
     expect(useBuilderStore.getState().isLoading).toBe(false);
   });
 
-  it("shared provider updates the message flow without mock fallback", async () => {
+  it("local provider updates the message flow without mock fallback", async () => {
     const store = useBuilderStore.getState();
     await store.sendMessage("Build a fitness app");
 
     const state = useBuilderStore.getState();
     expect(state.generationStatus).toBe("success");
-    expect(state.schema.name).toBe("New App");
+    expect(state.schema.name).toBe("Fitness Flow");
     expect(state.appliedChanges[0]?.text).toContain("screen");
     expect(state.messages.some((message) => message.role === "assistant" && message.error)).toBe(false);
   });
@@ -186,22 +219,22 @@ describe("Builder Store - Provider State", () => {
     useBuilderStore.getState().resetStore();
   });
 
-  it("has shared demo provider by default with no mock fallback", () => {
+  it("has qwen local provider by default with no mock fallback", () => {
     const state = useBuilderStore.getState();
-    expect(state.selectedProvider).toBe("groq_demo");
+    expect(state.selectedProvider).toBe("qwen-coder");
     expect(state.providers.some((provider) => provider.id === "mock")).toBe(false);
   });
 
   it("can change provider", () => {
     const store = useBuilderStore.getState();
-    store.setProvider("openai");
-    expect(useBuilderStore.getState().selectedProvider).toBe("openai");
+    store.setProvider("qwen-coder");
+    expect(useBuilderStore.getState().selectedProvider).toBe("qwen-coder");
   });
 
   it("can set API key", () => {
     const store = useBuilderStore.getState();
-    store.setApiKey("openai", "test-key-123");
-    expect(useBuilderStore.getState().apiKeys.openai).toBe("test-key-123");
+    store.setApiKey("qwen-coder", "test-key-123");
+    expect(useBuilderStore.getState().apiKeys["qwen-coder"]).toBe("test-key-123");
   });
 });
 

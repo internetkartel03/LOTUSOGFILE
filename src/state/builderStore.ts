@@ -2,9 +2,7 @@ import { create } from 'zustand';
 import { persist, subscribeWithSelector } from 'zustand/middleware';
 import type { AppSchema } from '@/lib/builder/appSchema';
 import { createEmptySchema, mergeSchemaUpdates } from '@/lib/builder/appSchema';
-import { SERVER_DEMO_PROVIDER_ID, defaultRegistry, providerRegistry } from '@/lib/ai/initProviders';
-import { loadStoredProviders } from '@/lib/ai/apiKeyStorage';
-import { proxyAIRequest } from '@/lib/ai/backendProxy';
+import { chatWithLocalModel, discoverLocalModels } from '@/lib/ai/localModels';
 import { loadUserProjects, saveProject, deleteProject as deleteStoredProject } from '@/lib/supabase/projectStorage';
 import { recordSkillUsage } from '@/lib/supabase/skillsStorage';
 import type { Skill } from '@/lib/skills/skillsData';
@@ -169,8 +167,34 @@ function withProjectSchema(project: Project | null, schema: AppSchema): Project 
   return project ? { ...project, schema, updatedAt: now() } : null;
 }
 
+const localModelRegistry: AIProviderConfig[] = [
+  { id: 'qwen-coder', name: 'Qwen Coder', model: 'qwen2.5-coder:1.5b', apiKey: '', apiEndpoint: 'local' },
+];
+
+function parseSchemaFromResponse(content: string) {
+  const match = content.match(/```json\s*([\s\S]*?)```/i);
+  const raw = match?.[1] ?? content.match(/\{[\s\S]*\}/)?.[0];
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+function getLocalSchemaPrompt(): string {
+  return [
+    'You are LOTUS, a production local-first mobile app builder.',
+    'Return only valid JSON. Do not use markdown, explanations, or prose.',
+    'The JSON must be an AppSchema with: name, description, screens, navigation, activeScreenId, theme, imageAssets, features.',
+    'Use only supported component types: header, text, button, input, card, list, image, avatar, badge, tabs, searchBar, carousel, chart, progress, progressRing, divider, fab, bottomNav, productGrid, categoryGrid, taskList, statsRow, sectionTitle, workoutList, cartList, summary, timer, exerciseList, rating, datePicker, select, imageGallery.',
+    'Every screen needs id, name, title, and components. Every component needs a type and props object.',
+    'Make the app concrete and complete for the user prompt, with realistic copy and multiple useful sections.',
+  ].join(' ');
+}
+
 function extractSchema(content: string, fallbackName: string): AppSchema {
-  const patch = providerRegistry.parseSchemaFromResponse(content) as Partial<AppSchema>;
+  const patch = parseSchemaFromResponse(content) as Partial<AppSchema>;
   return mergeSchemaUpdates(createEmptySchema(fallbackName), patch);
 }
 
@@ -189,7 +213,7 @@ function readStringSetting(key: string, fallback: string): string {
 }
 
 const initialSchema = createEmptySchema();
-const fallbackProviderId = SERVER_DEMO_PROVIDER_ID;
+const fallbackProviderId = 'qwen-coder';
 
 const useBuilderStore = create<BuilderState & BuilderActions>()(
   subscribeWithSelector(
@@ -222,7 +246,7 @@ const useBuilderStore = create<BuilderState & BuilderActions>()(
         currentProjectId: null,
         isProjectsLoading: false,
         _currentUser: null,
-        providers: defaultRegistry,
+        providers: localModelRegistry,
         providerId: fallbackProviderId,
         selectedProvider: fallbackProviderId,
         apiKeys: {},
@@ -323,7 +347,6 @@ const useBuilderStore = create<BuilderState & BuilderActions>()(
           if (!user) return;
           set({ isProjectsLoading: true });
           try {
-            await get().refreshProviders(user.id);
             const remote = await loadUserProjects(user.id);
             const projects = remote.map((p) => ({
               id: p.id,
@@ -367,25 +390,16 @@ const useBuilderStore = create<BuilderState & BuilderActions>()(
             lastFailedMessageId: null,
           });
           try {
-            const provider = get().providers.find((p) => p.id === get().providerId) ?? defaultRegistry[0];
-            let fullContent = '';
-            if (provider.id === 'mock') {
-              throw new Error('Demo Mock is disabled for this deployment. Configure a shared AI provider key.');
-            } else if (!provider.apiEndpoint) {
-              throw new Error(`Provider ${provider.name} is missing an API endpoint.`);
-            } else {
-              const proxyResponse = await proxyAIRequest({
-                provider: provider.id,
-                model: provider.model,
-                messages: [
-                  { role: 'system', content: readStringSetting('lotus_system_prompt', providerRegistry.getSystemPrompt()) },
-                  { role: 'user', content },
-                ],
-                temperature: readNumberSetting('lotus_temperature', 0.7),
-                max_tokens: readNumberSetting('lotus_max_tokens', 1800),
-              });
-              fullContent = proxyResponse.content;
-            }
+            const models = await discoverLocalModels();
+            const selectedModel =
+              models.find((model) => model.id === get().providerId) ??
+              models.find((model) => model.id === fallbackProviderId) ??
+              models[0];
+            if (!selectedModel) throw new Error('No local models are configured.');
+            const fullContent = await chatWithLocalModel(selectedModel, [
+              { role: 'system', content: readStringSetting('lotus_system_prompt', getLocalSchemaPrompt()) },
+              { role: 'user', content },
+            ]);
             const updatedSchema = extractSchema(fullContent, get().schema.name);
             const changesSummary = `${updatedSchema.screens.length} screen${updatedSchema.screens.length === 1 ? '' : 's'} updated`;
             get().pushSchemaHistory(updatedSchema);
@@ -401,7 +415,7 @@ const useBuilderStore = create<BuilderState & BuilderActions>()(
           } catch (error) {
             const message = error instanceof Error ? error.message : 'Unknown error';
             set((state) => ({
-              messages: state.messages.map((m) => m.id === assistantId ? { ...m, content: 'Generation failed. Check the shared AI provider configuration in Supabase Edge Function secrets.', isStreaming: false, error: message } : m),
+              messages: state.messages.map((m) => m.id === assistantId ? { ...m, content: `Generation needs a local model runtime. ${message}`, isStreaming: false, error: message } : m),
               isLoading: false,
               generationStatus: 'error',
               error: message,
@@ -453,27 +467,8 @@ const useBuilderStore = create<BuilderState & BuilderActions>()(
         setApiKey: (id, apiKey) => set({ apiKeys: { ...get().apiKeys, [id]: apiKey } }),
         switchProvider: (id) => set({ providerId: id, selectedProvider: id }),
         refreshProviders: async (userId) => {
-          try {
-            const storedProviders = await loadStoredProviders(userId);
-            const configuredProviders = storedProviders
-              .filter((provider) => provider.apiKey && provider.apiKey.length > 10)
-              .map((provider) => ({
-                id: provider.id,
-                name: provider.name,
-                apiKey: provider.apiKey,
-                model: provider.model,
-                apiEndpoint: provider.baseUrl,
-              }));
-            const providers = [
-              ...defaultRegistry,
-              ...configuredProviders.filter((provider) => !defaultRegistry.some((preset) => preset.id === provider.id)),
-            ];
-            const providerId = providers.some((provider) => provider.id === get().providerId) ? get().providerId : fallbackProviderId;
-            set({ providers, providerId, selectedProvider: providerId });
-          } catch (error) {
-            console.error('[LOTUS] Failed to refresh AI providers:', error);
-            if (get().providers.length === 0) set({ providers: defaultRegistry, providerId: fallbackProviderId, selectedProvider: fallbackProviderId });
-          }
+          const providerId = localModelRegistry.some((provider) => provider.id === get().providerId) ? get().providerId : fallbackProviderId;
+          set({ providers: localModelRegistry, providerId, selectedProvider: providerId });
         },
 
         installSkill: (skill) => set({ installedSkills: [...get().installedSkills.filter((s) => s.id !== skill.id), skill] }),
@@ -501,7 +496,7 @@ const useBuilderStore = create<BuilderState & BuilderActions>()(
         setExportFormat: (exportFormat) => set({ exportFormat }),
         resetStore: () => {
           const schema = createEmptySchema();
-          set({ messages: [], isLoading: false, streamingMessage: '', error: null, appliedChanges: [], schema, history: [schema], schemaHistory: [schema], historyIndex: 0, currentProjectId: null, project: null, projects: [], providers: defaultRegistry, providerId: fallbackProviderId, selectedProvider: fallbackProviderId, activePanel: 'chat', mobileTab: 'chat', isSidebarOpen: true, activeOverlay: null, isToolsOpen: false, apiKeys: {}, theme: 'dark', exportFormat: 'pwa', generationStatus: 'idle' });
+          set({ messages: [], isLoading: false, streamingMessage: '', error: null, appliedChanges: [], schema, history: [schema], schemaHistory: [schema], historyIndex: 0, currentProjectId: null, project: null, projects: [], providers: localModelRegistry, providerId: fallbackProviderId, selectedProvider: fallbackProviderId, activePanel: 'chat', mobileTab: 'chat', isSidebarOpen: true, activeOverlay: null, isToolsOpen: false, apiKeys: {}, theme: 'dark', exportFormat: 'pwa', generationStatus: 'idle' });
         },
       }),
       {

@@ -28,11 +28,120 @@
   z-index: -3;
   width: 108vw;
   height: 108dvh;
-  object-fit: cover;
-  object-position: center center;
-  background: #050402 url("/lotus-landing-bg.jpg") center / cover no-repeat;
+  background: #050402 url("/lotus-home-bg.jpg") center / cover no-repeat;
   transform: scale(1.08);
   transform-origin: center center;
+}
+
+/* --- Phone preview (local HTML-in-iframe) --- */
+.phone-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 0 24px;
+}
+
+.phone-frame {
+  position: relative;
+  width: 390px;
+  max-width: 100%;
+  height: 844px;
+  max-height: min(844px, calc(100dvh - 220px));
+  border-radius: 44px;
+  background: #0b0b0f;
+  border: 10px solid #17171d;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.phone-screen {
+  position: absolute;
+  inset: 0;
+  border-radius: 34px;
+  overflow: hidden;
+  background: #000;
+}
+
+.phone-screen iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: #000;
+}
+
+.phone-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 28px;
+  text-align: center;
+  color: rgba(255, 248, 237, 0.82);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.phone-state .spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 248, 237, 0.2);
+  border-top-color: #d9a441;
+  animation: preview-spin 0.9s linear infinite;
+}
+
+@keyframes preview-spin {
+  to { transform: rotate(360deg); }
+}
+
+.preview-regenerate {
+  min-height: 44px;
+  padding: 0 22px;
+  border: none;
+  border-radius: 22px;
+  background: #d9a441;
+  color: #171204;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.preview-regenerate.secondary {
+  background: rgba(255, 248, 237, 0.12);
+  color: #fff8ed;
+}
+
+.preview-regenerate:disabled {
+  opacity: 0.48;
+  cursor: default;
+}
+
+.preview-actions {
+  position: relative;
+  z-index: 70;
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  padding: 0 0 24px;
+}
+
+@media (max-width: 480px) {
+  .phone-frame {
+    width: 100%;
+    height: calc(100dvh - 200px);
+    border-radius: 32px;
+    border-width: 6px;
+  }
+  .phone-screen {
+    border-radius: 26px;
+  }
+  .preview-actions {
+    padding-bottom: 18px;
+  }
 }
 
 .landing-page::after {
@@ -47,7 +156,7 @@
 .landing-header {
   position: fixed;
   top: max(16px, env(safe-area-inset-top));
-  right: 20px;
+  left: 20px;
   z-index: 20;
 }
 
@@ -98,7 +207,7 @@
 .landing-menu {
   position: absolute;
   top: calc(100% + 12px);
-  right: 0;
+  left: 0;
   display: grid;
   width: min(calc(100vw - 40px), 260px);
   overflow: hidden;
@@ -471,7 +580,7 @@
 @media (min-width: 768px) {
   .landing-header {
     top: 28px;
-    right: 32px;
+    left: 32px;
   }
 
   .builder-modal {
@@ -669,6 +778,10 @@
   transform: translateX(0);
 }
 
+#preview.lotus-screen {
+  padding-bottom: 224px;
+}
+
 .toprow {
   display: flex;
   align-items: center;
@@ -764,6 +877,38 @@
   line-height: 1.35;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 4;
+}
+
+.result-card {
+  display: grid;
+  gap: 10px;
+}
+
+.result-card p {
+  display: block;
+  overflow: visible;
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-line-clamp: unset;
+}
+
+.chat-followups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.followup-chip {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(169, 118, 27, 0.08);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 0 12px;
 }
 
 .typing-line {
@@ -908,6 +1053,18 @@
 
 .pill.open {
   transform: rotate(45deg);
+}
+
+.pill.ghost {
+  width: auto;
+  min-width: 60px;
+  border-radius: 999px;
+  background: rgba(169, 118, 27, 0.12);
+  color: var(--gold);
+  font-size: 12px;
+  font-weight: 800;
+  padding: 0 14px;
+  box-shadow: none;
 }
 
 .pill svg {

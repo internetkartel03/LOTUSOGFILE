@@ -1,69 +1,52 @@
-# LOTUS Demo Verification Checklist
+# LOTUS Verification Checklist
 
-Last updated: 2026-06-30
+Last updated: 2026-07-03
 
-This checklist separates code-verified demo behavior from remote checks that require a live Supabase project, live user account, and optional provider API key. The app should stay usable if Supabase tables or provider keys are missing; those cases should surface clean errors and keep the Demo Mock path available.
+This checklist reflects the current local-first builder milestone.
 
-## Verified In Code
+## Code-Level Verification
 
-- Fresh build path: `npm run build`
-- Test suite path: `npm run test:run`
-- Settings can register OpenAI-compatible providers such as Groq and OpenRouter into the runtime provider list.
-- Authenticated project loading treats Supabase projects as the source of truth and does not reuse old local project cache when the remote project list is empty.
-- Auth creates/updates a Supabase `user_profiles` row so provider keys can be saved to the logged-in demo account.
-- `sendMessage` uses the selected provider when it has an endpoint and API key.
-- Demo Mock remains the default fallback and updates the preview schema.
-- Provider failures add a clean assistant error suggesting Demo Mock.
-- Renderer uses `schema.activeScreenId`, with fallback to the first screen.
-- Bottom navigation can request active screen changes through the existing navigation callback.
-- Uploaded `imageAssets` render in preview when components reference `assetId`, `imageAssetId`, `src`, or `image`.
-- Static/PWA export uses the active schema screen and includes image asset data URLs.
-- Exported PWA files include `icon.svg` and do not reference missing PNG icons.
-- Public assets exist and are non-empty:
-  - `public/logo-lotus.png`
-  - `public/icon-192.png`
-  - `public/icon-512.png`
-  - `public/screenshot-wide.png`
-  - `public/screenshot-narrow.png`
+- `npm run build`
+- `npm run test:run`
+- landing route sends `App Builder` traffic to the dedicated builder deploy
+- builder uses local runtime discovery from `src/lib/ai/localModels.ts`
+- active local builder path is reduced to `Qwen Coder`
+- preview sanitization strips markdown fences before rendering
+- preview HTML can be exported from the builder UI
+- project backup exports a dated JSON file
+- chat result state is replaced with continued build guidance and next-step suggestions
 
-## Manual Supabase Verification Required
+## Browser Verification
 
-Use a fresh browser profile or clear local storage before the run.
+Run against local dev or live builder deploy.
 
-1. Start the app with `npm run dev`.
-2. Sign up with a new email/password account.
-3. Confirm the auth screen transitions to the builder.
-4. Log out.
-5. Log back in with the same account.
-6. Refresh the page and confirm the returning Supabase session opens the builder without re-entering credentials.
-7. Create a project and confirm it appears in the sidebar.
-8. Rename the project and refresh to confirm the new name reloads from Supabase.
-9. Switch between at least two projects and confirm each schema remains separate.
-10. Send a Demo Mock chat message and confirm the preview updates.
-11. Refresh and confirm the updated schema reloads.
-12. Delete a project and refresh to confirm it remains deleted.
-13. If the `projects` or `user_profiles` tables are missing, confirm the app logs a clear LOTUS error and keeps the local demo usable.
+1. Open the public landing page.
+2. Open the menu.
+3. Click `App Builder`.
+4. Confirm the browser lands on the builder deploy, not a blank page.
+5. Submit a prompt such as `Build a luxury skincare app landing flow with a product hero and testimonials.`
+6. Confirm the builder switches to Preview and streams a live state.
+7. Confirm the preview finishes with rendered HTML.
+8. Inspect the iframe body and confirm HTML is present.
+9. Confirm generated visuals can include inline SVG.
+10. Confirm the assistant shows next-step suggestions instead of stopping at `Result`.
+11. Confirm `Keep Building in Preview` works.
+12. Confirm the chat bar is still usable while on the Preview screen.
+13. Confirm `Export HTML` downloads a dated file.
+14. Confirm `Rebuild` reruns the last prompt.
 
-## Manual Provider Verification Required
+## Reality Check
 
-1. Open Settings.
-2. Add a Groq or OpenRouter key.
-3. Confirm the saved provider appears in Active Provider.
-4. Select the saved provider.
-5. Send a chat prompt.
-6. Confirm the network request is sent to the provider chat completions endpoint with `model` and `messages`.
-7. Confirm a successful provider response updates the preview.
-8. Force a bad key and confirm the chat shows: "Generation failed. Check provider settings or switch to Demo Mock."
-9. Switch back to Demo Mock and confirm chat works again.
+What is verified today:
 
-## Export Verification
+- dependable frontend HTML generation
+- dependable live preview rendering
+- dependable landing-to-builder routing
+- dependable continuation loop after generation
 
-1. Create or load a project with multiple screens.
-2. Set the active screen via bottom navigation or schema state.
-3. Upload an image and reference it from an image component.
-4. Export as PWA or static zip.
-5. Open the zip and confirm:
-   - `index.html` renders the active screen.
-   - `manifest.json` references included `icon.svg`.
-   - Uploaded image data URLs appear in `index.html`.
-   - No exported file references missing `icon-192.png` or `icon-512.png`.
+What is not yet fully verified as production-complete:
+
+- dedicated image-model generation pipeline
+- native/mobile export targets beyond HTML
+- stable multi-model comparison flow
+- fully decomposed builder architecture
