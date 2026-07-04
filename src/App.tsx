@@ -795,14 +795,18 @@ function App() {
       );
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
-      const detail = error instanceof Error ? error.message : 'Unknown error';
-      const hint = error instanceof LocalModelError ? ` ${error.hint}` : '';
+
+      // Log technical details for debugging
+      console.error('Generation error:', error);
+
+      // Show user-friendly error message
+      const userMessage = 'We couldn\'t generate your app right now. Please try again.';
       setPreviewStatus('error');
-      setGenerationStatusText('The builder hit a real error before the preview could finish.');
+      setGenerationStatusText('Generation failed.');
       setMessages((current) =>
         current.map((message) =>
           message.id === assistantId
-            ? { ...message, content: `Build update: the preview could not finish (${detail}).${hint}`, isLoading: false }
+            ? { ...message, content: userMessage, isLoading: false }
             : message,
         ),
       );

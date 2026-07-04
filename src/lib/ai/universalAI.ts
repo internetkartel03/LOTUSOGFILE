@@ -81,11 +81,13 @@ export async function generateApp(request: AIGenerationRequest): Promise<AIGener
       return await generateWithCloudAI(request, appType);
     }
   } catch (error) {
-    console.error('Generation failed, attempting fallback...');
-    // If local fails, try cloud
+    console.error('Generation failed:', error);
+    // If local fails, try cloud; but never fall back from cloud to local
     if (provider === 'local') {
+      console.error('Local AI failed, attempting cloud fallback...');
       return generateWithCloudAI(request, appType);
     }
+    // Cloud failed - don't try local fallback
     throw error;
   }
 }
