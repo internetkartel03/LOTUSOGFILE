@@ -10,6 +10,8 @@ export interface AppSchema {
   theme: ThemeConfig;
   imageAssets: ImageAsset[];
   features: string[];
+  generatedHtml?: string;
+  lastGenerated?: string;
 }
 
 export interface Screen {

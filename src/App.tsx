@@ -36,6 +36,7 @@ import { DEFAULT_LOCAL_MODELS, discoverLocalModels, chatWithLocalModel, LocalMod
 import { LOCAL_HTML_SYSTEM_PROMPT, sanitizeHtmlDocument, type PreviewStatus } from '@/lib/builder/localHtmlPreview';
 import { generateApp } from '@/lib/ai/universalAI';
 import { detectAppType } from '@/lib/ai/appTypeDetection';
+import { subscribeToProjectUpdates } from '@/lib/supabase/realtimeSubscription';
 import type { AppSchema } from '@/lib/builder/appSchema';
 import { createEmptySchema } from '@/lib/builder/appSchema';
 import { starterTemplates } from '@/lib/templates/templates';
@@ -381,6 +382,61 @@ function App() {
     }, 30000);
     return () => window.clearInterval(timer);
   }, [autoSave, currentProject, storageUserId]);
+
+  useEffect(() => {
+    if (!currentProject || !hasSupabaseEnv) return;
+
+    console.log('[Realtime] Setting up subscription for project:', currentProject.id);
+
+    const unsubscribe = subscribeToProjectUpdates(
+      currentProject.id,
+      (updatedSchema) => {
+        console.log('[Realtime] Received schema update:', updatedSchema);
+
+        if (!updatedSchema.generatedHtml) {
+          console.warn('[Realtime] No generatedHtml in schema');
+          return;
+        }
+
+        setProjects((prev) =>
+          prev.map((p) =>
+            p.id === currentProject.id ? { ...p, schema: updatedSchema } : p
+          )
+        );
+
+        try {
+          const html = sanitizeHtmlDocument(updatedSchema.generatedHtml);
+          if (html) {
+            console.log('[Preview] Refreshing preview from Realtime event');
+            setPreviewHtml(html);
+            setPreviewStatus('success');
+            setGenerationStatusText('Live preview updated.');
+            setMessages((current) =>
+              current.map((msg) =>
+                msg.role === 'assistant' && msg.content.includes('Opening the live preview')
+                  ? { ...msg, content: 'Preview is now live and updating in real-time.' }
+                  : msg
+              )
+            );
+          } else {
+            console.warn('[Preview] Sanitized HTML is empty');
+          }
+        } catch (error) {
+          console.error('[Preview] Error updating preview:', error);
+          setGenerationStatusText('Preview update failed.');
+        }
+      },
+      (error) => {
+        console.error('[Realtime] Subscription error:', error);
+        setGenerationStatusText('Realtime connection unavailable.');
+      }
+    );
+
+    return () => {
+      console.log('[Realtime] Unsubscribing from project updates');
+      unsubscribe();
+    };
+  }, [currentProject?.id, hasSupabaseEnv]);
 
   const go = (screen: ScreenName) => {
     setPopoverOpen(false);
@@ -776,6 +832,27 @@ function App() {
 
       setPreviewHtml(html);
       setPreviewStatus("success");
+
+      // Save generated code to Supabase for Realtime sync
+      if (currentProject && storageUserId) {
+        console.log('[Save] Saving generated code to Supabase for project:', currentProject.id);
+        try {
+          const { saveProject } = await import('@/lib/supabase/projectStorage');
+          const updatedProject = {
+            ...currentProject,
+            updatedAt: Date.now(),
+            schema: {
+              ...currentProject.schema,
+              generatedHtml: html,
+              lastGenerated: new Date().toISOString(),
+            },
+          };
+          await saveProject(storageUserId, updatedProject);
+          console.log('[Save] Project saved to Supabase, Realtime event should trigger');
+        } catch (error) {
+          console.error('[Save] Error saving to Supabase:', error);
+        }
+      }
 
       const displayAppType = appType === "custom" ? "custom app" : appType;
       const responseText = "I built the first version of your " + displayAppType + ". The core screens and layout are ready. Here is what I can add next:";
