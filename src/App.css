@@ -4,9 +4,9 @@
 }
 
 :root {
-  --landing-bg-image: url("/lotus-landing-mobile.png");
-  --landing-bg-position: 50% 46%;
-  --landing-bg-size: cover;
+  --landing-bg-image: url("/lotus-flower.png");
+  --landing-bg-position: 50% 50%;
+  --landing-bg-size: contain;
 }
 
 .landing-page {
