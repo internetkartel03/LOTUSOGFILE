@@ -13,7 +13,11 @@ export default async function handler(req, res) {
   }
 
   const openRouterKey = process.env.OPENROUTER_API_KEY;
+  console.log('[API] OpenRouter Key Present:', !!openRouterKey);
+  console.log('[API] Key Length:', openRouterKey ? openRouterKey.length : 0);
+
   if (!openRouterKey) {
+    console.error('[API] OPENROUTER_API_KEY is not set in environment');
     return res.status(500).json({
       error: 'AI service unavailable',
       message: 'We\'re unable to connect to the AI engine right now. Please try again in a moment.'
